@@ -34,7 +34,7 @@ const DEFAULT_PROMPTS = {
 
 const recentTextsCache = new Map();
 const fragmentCountCache = new Map();
-const summaryJobs = new Set();
+const summaryJobs = new Map();
 
 const initPromise = initDatabase().then(initRuntimeCaches);
 
@@ -173,67 +173,71 @@ async function rebuildProjectCaches(projectId) {
 
 async function ensureBlockSummaryGenerated(projectId, blockNumber, projectName, settings) {
   const jobId = `${projectId}:${blockNumber}`;
-  if (summaryJobs.has(jobId)) return;
-  summaryJobs.add(jobId);
+  if (summaryJobs.has(jobId)) return summaryJobs.get(jobId);
 
-  try {
-    if (!openai) return;
+  const jobPromise = (async () => {
+    try {
+      if (!openai) return;
 
-    const existing = await pool.query(
-      "SELECT id FROM block_summaries WHERE project_id = $1 AND block_number = $2",
-      [projectId, blockNumber]
-    );
-    if (existing.rowCount) return;
+      const existing = await pool.query(
+        "SELECT id FROM block_summaries WHERE project_id = $1 AND block_number = $2",
+        [projectId, blockNumber]
+      );
+      if (existing.rowCount) return;
 
-    const offset = (blockNumber - 1) * 10;
-    const fragmentsResult = await pool.query(
-      `
-      SELECT text
-      FROM fragments
-      WHERE project_id = $1
-      ORDER BY created_at ASC
-      OFFSET $2 LIMIT 10
-    `,
-      [projectId, offset]
-    );
+      const offset = (blockNumber - 1) * 10;
+      const fragmentsResult = await pool.query(
+        `
+        SELECT text
+        FROM fragments
+        WHERE project_id = $1
+        ORDER BY created_at ASC
+        OFFSET $2 LIMIT 10
+      `,
+        [projectId, offset]
+      );
 
-    if (fragmentsResult.rowCount < 10) return;
+      if (fragmentsResult.rowCount < 10) return;
 
-    const fragmentsText = fragmentsResult.rows
-      .map((row, index) => `${index + 1}. ${row.text}`)
-      .join("\n");
+      const fragmentsText = fragmentsResult.rows
+        .map((row, index) => `${index + 1}. ${row.text}`)
+        .join("\n");
 
-    const response = await openai.responses.create({
-      model: settings.selectedModel || defaultModel,
-      input: [
-        {
-          role: "system",
-          content: settings.prompts.blockSummaryPrompt || DEFAULT_PROMPTS.blockSummaryPrompt
-        },
-        {
-          role: "user",
-          content: `Project: ${projectName}\nBlock number: ${blockNumber}\nFragments:\n${fragmentsText}`
-        }
-      ],
-      max_output_tokens: 180
-    });
+      const response = await openai.responses.create({
+        model: settings.selectedModel || defaultModel,
+        input: [
+          {
+            role: "system",
+            content: settings.prompts.blockSummaryPrompt || DEFAULT_PROMPTS.blockSummaryPrompt
+          },
+          {
+            role: "user",
+            content: `Project: ${projectName}\nBlock number: ${blockNumber}\nFragments:\n${fragmentsText}`
+          }
+        ],
+        max_output_tokens: 180
+      });
 
-    const summary = (response.output_text || "").trim() || "Resumen no disponible.";
+      const summary = (response.output_text || "").trim() || "Resumen no disponible.";
 
-    await pool.query(
-      `
-      INSERT INTO block_summaries (id, project_id, block_number, summary)
-      VALUES ($1, $2, $3, $4)
-      ON CONFLICT (project_id, block_number)
-      DO UPDATE SET summary = EXCLUDED.summary
-    `,
-      [crypto.randomUUID(), projectId, blockNumber, summary]
-    );
-  } catch (error) {
-    console.error("Block summary generation error:", error);
-  } finally {
-    summaryJobs.delete(jobId);
-  }
+      await pool.query(
+        `
+        INSERT INTO block_summaries (id, project_id, block_number, summary)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (project_id, block_number)
+        DO UPDATE SET summary = EXCLUDED.summary
+      `,
+        [crypto.randomUUID(), projectId, blockNumber, summary]
+      );
+    } catch (error) {
+      console.error("Block summary generation error:", error);
+    } finally {
+      summaryJobs.delete(jobId);
+    }
+  })();
+
+  summaryJobs.set(jobId, jobPromise);
+  return jobPromise;
 }
 
 app.use(express.json({ limit: "1mb" }));
@@ -305,7 +309,7 @@ app.post("/api/projects", async (req, res) => {
 app.get("/api/projects/:projectId/fragments", async (req, res) => {
   try {
     const projectId = req.params.projectId;
-    const project = await pool.query("SELECT id FROM projects WHERE id = $1", [projectId]);
+    const project = await pool.query("SELECT id, name FROM projects WHERE id = $1", [projectId]);
     if (!project.rowCount) return res.status(404).json({ error: "Project not found." });
 
     const countResult = await pool.query(
@@ -329,8 +333,59 @@ app.get("/api/projects/:projectId/fragments", async (req, res) => {
       [projectId, pageSize, offset]
     );
 
+    const neededBlocks = [];
+    for (let index = 0; index < rows.rows.length; index += 1) {
+      const descRank = offset + index + 1;
+      const ascPosition = total - descRank + 1;
+      if (ascPosition > 0 && ascPosition % 10 === 0) {
+        neededBlocks.push(ascPosition / 10);
+      }
+    }
+
+    let summaries = [];
+    if (neededBlocks.length > 0) {
+      const uniqueBlocks = [...new Set(neededBlocks)].sort((a, b) => a - b);
+      const existingResult = await pool.query(
+        `
+        SELECT
+          block_number AS "blockNumber",
+          summary,
+          created_at AS "createdAt"
+        FROM block_summaries
+        WHERE project_id = $1
+          AND block_number = ANY($2::int[])
+      `,
+        [projectId, uniqueBlocks]
+      );
+
+      const existingMap = new Map(existingResult.rows.map((row) => [row.blockNumber, row]));
+      const missingBlocks = uniqueBlocks.filter((blockNumber) => !existingMap.has(blockNumber));
+
+      if (missingBlocks.length > 0 && openai) {
+        const settings = await getSettings();
+        for (const blockNumber of missingBlocks) {
+          await ensureBlockSummaryGenerated(projectId, blockNumber, project.rows[0].name, settings);
+        }
+      }
+
+      const finalResult = await pool.query(
+        `
+        SELECT
+          block_number AS "blockNumber",
+          summary,
+          created_at AS "createdAt"
+        FROM block_summaries
+        WHERE project_id = $1
+          AND block_number = ANY($2::int[])
+      `,
+        [projectId, uniqueBlocks]
+      );
+      summaries = finalResult.rows;
+    }
+
     res.json({
       fragments: rows.rows,
+      summaries,
       page,
       pageSize,
       total,
@@ -339,33 +394,6 @@ app.get("/api/projects/:projectId/fragments", async (req, res) => {
   } catch (error) {
     console.error("Fragments list error:", error);
     res.status(500).json({ error: "Failed to load fragments." });
-  }
-});
-
-app.get("/api/projects/:projectId/block-summaries", async (req, res) => {
-  try {
-    const projectId = req.params.projectId;
-    const limit = Math.max(1, Math.min(100, Number.parseInt(String(req.query.limit || "20"), 10) || 20));
-
-    const rows = await pool.query(
-      `
-      SELECT
-        id,
-        block_number AS "blockNumber",
-        summary,
-        created_at AS "createdAt"
-      FROM block_summaries
-      WHERE project_id = $1
-      ORDER BY block_number DESC
-      LIMIT $2
-    `,
-      [projectId, limit]
-    );
-
-    res.json({ summaries: rows.rows });
-  } catch (error) {
-    console.error("Block summaries list error:", error);
-    res.status(500).json({ error: "Failed to load block summaries." });
   }
 });
 

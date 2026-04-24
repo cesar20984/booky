@@ -1,4 +1,5 @@
 const PAUSE_MS = 2000;
+const PAGE_SIZE = 20;
 
 const tabApp = document.getElementById("tabApp");
 const tabSettings = document.getElementById("tabSettings");
@@ -11,10 +12,9 @@ const newProjectInput = document.getElementById("newProjectInput");
 const micButton = document.getElementById("micButton");
 const statusText = document.getElementById("statusText");
 const liveTranscript = document.getElementById("liveTranscript");
-const blockSummariesList = document.getElementById("blockSummariesList");
 const fragmentsList = document.getElementById("fragmentsList");
 const fragmentTemplate = document.getElementById("fragmentTemplate");
-const blockSummaryTemplate = document.getElementById("blockSummaryTemplate");
+const inlineSummaryTemplate = document.getElementById("inlineSummaryTemplate");
 const prevPageButton = document.getElementById("prevPageButton");
 const nextPageButton = document.getElementById("nextPageButton");
 const paginationText = document.getElementById("paginationText");
@@ -29,7 +29,8 @@ const settingsStatus = document.getElementById("settingsStatus");
 let projects = [];
 let selectedProjectId = "";
 let fragments = [];
-let blockSummaries = [];
+let summariesByBlock = new Map();
+let fragmentsTotal = 0;
 let currentPage = 1;
 let totalPages = 1;
 let selectedModel = "";
@@ -41,6 +42,7 @@ let pauseTimer = null;
 let currentBuffer = "";
 let interimBuffer = "";
 
+let availableModels = [];
 const textCache = new Map();
 
 bootstrap();
@@ -62,8 +64,8 @@ projectSelect.addEventListener("change", async () => {
   if (!selectedProjectId) {
     stopListening();
     fragments = [];
-    blockSummaries = [];
-    renderBlockSummaries();
+    summariesByBlock = new Map();
+    fragmentsTotal = 0;
     renderFragments();
     updatePagination();
     setStatus("Selecciona o crea un proyecto para empezar.");
@@ -71,7 +73,7 @@ projectSelect.addEventListener("change", async () => {
   }
 
   setStatus("Proyecto cambiado. Listo para escuchar.");
-  await Promise.all([loadFragments(), loadBlockSummaries()]);
+  await loadFragments();
 });
 
 createProjectForm.addEventListener("submit", async (event) => {
@@ -99,7 +101,6 @@ micButton.addEventListener("click", () => {
     setStatus("Tu navegador no soporta reconocimiento de voz.", true);
     return;
   }
-
   if (listening) stopListening();
   else startListening();
 });
@@ -135,10 +136,7 @@ saveSettingsButton.addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         selectedModel: model,
-        prompts: {
-          ideaPrompt,
-          blockSummaryPrompt
-        }
+        prompts: { ideaPrompt, blockSummaryPrompt }
       })
     });
 
@@ -184,7 +182,6 @@ function initSpeechRecognition() {
       currentBuffer += `${finalText.trim()} `;
       schedulePauseFlush();
     }
-
     updateLiveTranscript();
   };
 
@@ -210,6 +207,7 @@ function startListening() {
   listening = true;
   micButton.textContent = "Detener microfono";
   setStatus("Escuchando... pausa mas de 2s para cerrar fragmento.");
+
   try {
     recognition.start();
   } catch (_error) {
@@ -262,7 +260,7 @@ async function flushCurrentBuffer() {
         textCache.clear();
         if (currentPage !== 1) currentPage = 1;
         await loadProjects(selectedProjectId);
-        await Promise.all([loadFragments(), loadBlockSummaries()]);
+        await loadFragments();
       }
     } catch (error) {
       setStatus(error.message, true);
@@ -275,19 +273,18 @@ async function flushCurrentBuffer() {
 
   currentBuffer = "";
   updateLiveTranscript();
-
   setStatus("Analizando fragmento con IA...");
+
   try {
     await fetchJson(`/api/projects/${selectedProjectId}/fragments/analyze`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text })
     });
-
     textCache.clear();
     currentPage = 1;
     await loadProjects(selectedProjectId);
-    await Promise.all([loadFragments(), loadBlockSummaries()]);
+    await loadFragments();
     setStatus("Fragmento guardado y analizado.");
   } catch (error) {
     setStatus(error.message, true);
@@ -315,12 +312,12 @@ async function loadProjects(preferredProjectId = "") {
     micButton.disabled = !selectedProjectId;
 
     if (selectedProjectId) {
-      await Promise.all([loadFragments(), loadBlockSummaries()]);
+      await loadFragments();
       setStatus("Proyecto listo. Puedes activar el microfono.");
     } else {
       fragments = [];
-      blockSummaries = [];
-      renderBlockSummaries();
+      summariesByBlock = new Map();
+      fragmentsTotal = 0;
       renderFragments();
       updatePagination();
       setStatus("Selecciona o crea un proyecto para empezar.");
@@ -331,8 +328,8 @@ async function loadProjects(preferredProjectId = "") {
     micButton.disabled = true;
     renderProjectOptions();
     fragments = [];
-    blockSummaries = [];
-    renderBlockSummaries();
+    summariesByBlock = new Map();
+    fragmentsTotal = 0;
     renderFragments();
     updatePagination();
     setStatus(error.message, true);
@@ -343,6 +340,8 @@ async function loadFragments() {
   try {
     if (!selectedProjectId) {
       fragments = [];
+      summariesByBlock = new Map();
+      fragmentsTotal = 0;
       renderFragments();
       updatePagination();
       return;
@@ -353,28 +352,12 @@ async function loadFragments() {
     );
 
     fragments = payload.fragments || [];
+    summariesByBlock = new Map((payload.summaries || []).map((item) => [item.blockNumber, item]));
+    fragmentsTotal = payload.total || 0;
     currentPage = payload.page || 1;
     totalPages = payload.totalPages || 1;
     renderFragments();
     updatePagination();
-  } catch (error) {
-    setStatus(error.message, true);
-  }
-}
-
-async function loadBlockSummaries() {
-  try {
-    if (!selectedProjectId) {
-      blockSummaries = [];
-      renderBlockSummaries();
-      return;
-    }
-
-    const payload = await fetchJson(
-      `/api/projects/${selectedProjectId}/block-summaries?limit=20`
-    );
-    blockSummaries = payload.summaries || [];
-    renderBlockSummaries();
   } catch (error) {
     setStatus(error.message, true);
   }
@@ -398,6 +381,7 @@ function renderProjectOptions() {
 
 function renderFragments() {
   fragmentsList.innerHTML = "";
+
   if (!selectedProjectId) {
     fragmentsList.innerHTML = "<p class='status'>Aun no hay proyecto seleccionado.</p>";
     return;
@@ -408,7 +392,7 @@ function renderFragments() {
     return;
   }
 
-  fragments.forEach((fragment) => {
+  fragments.forEach((fragment, index) => {
     const node = fragmentTemplate.content.cloneNode(true);
     const time = node.querySelector(".fragment-time");
     const idea = node.querySelector(".fragment-idea");
@@ -440,6 +424,7 @@ function renderFragments() {
           textCache.set(fragment.id, payload.text || "");
         }
 
+        textNode.classList.remove("error");
         textNode.textContent = textCache.get(fragment.id) || "(sin texto)";
         textBox.classList.remove("hidden");
         toggleButton.textContent = "Ocultar texto";
@@ -460,7 +445,7 @@ function renderFragments() {
         }
         textCache.delete(fragment.id);
         await loadProjects(selectedProjectId);
-        await Promise.all([loadFragments(), loadBlockSummaries()]);
+        await loadFragments();
         setStatus("Fragmento borrado.");
       } catch (error) {
         setStatus(error.message, true);
@@ -468,29 +453,20 @@ function renderFragments() {
     });
 
     fragmentsList.appendChild(node);
-  });
-}
 
-function renderBlockSummaries() {
-  blockSummariesList.innerHTML = "";
-  if (!selectedProjectId) {
-    blockSummariesList.innerHTML = "<p class='status'>Selecciona un proyecto para ver resumenes.</p>";
-    return;
-  }
-
-  if (!blockSummaries.length) {
-    blockSummariesList.innerHTML =
-      "<p class='status'>Aun no hay resumenes de bloques (se crean cada 10 fragmentos).</p>";
-    return;
-  }
-
-  blockSummaries.forEach((item) => {
-    const node = blockSummaryTemplate.content.cloneNode(true);
-    const title = node.querySelector(".block-summary-title");
-    const text = node.querySelector(".block-summary-text");
-    title.textContent = `Bloque ${item.blockNumber} (${formatTime(item.createdAt)})`;
-    text.textContent = item.summary;
-    blockSummariesList.appendChild(node);
+    const descRank = (currentPage - 1) * PAGE_SIZE + index + 1;
+    const ascPosition = fragmentsTotal - descRank + 1;
+    if (ascPosition > 0 && ascPosition % 10 === 0) {
+      const blockNumber = ascPosition / 10;
+      const summary = summariesByBlock.get(blockNumber);
+      if (summary) {
+        const summaryNode = inlineSummaryTemplate.content.cloneNode(true);
+        summaryNode.querySelector(".inline-summary-title").textContent =
+          `Resumen de bloque ${blockNumber}`;
+        summaryNode.querySelector(".inline-summary-text").textContent = summary.summary;
+        fragmentsList.appendChild(summaryNode);
+      }
+    }
   });
 }
 
@@ -512,8 +488,6 @@ async function loadSettings() {
     setSettingsStatus(error.message, true);
   }
 }
-
-let availableModels = [];
 
 async function loadModels(showMessage = false) {
   try {

@@ -179,26 +179,20 @@ h2 {
   gap: 0.7rem;
 }
 
-.block-summaries {
-  display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
-}
-
-.block-summary {
+.inline-summary {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 0.75rem;
-  background: #f8fafc;
+  background: linear-gradient(135deg, #ecfeff, #f0fdf4);
 }
 
-.block-summary-title {
+.inline-summary-title {
   margin: 0;
   font-size: 0.82rem;
   color: var(--muted);
 }
 
-.block-summary-text {
+.inline-summary-text {
   margin: 0.45rem 0 0;
   font-weight: 700;
   color: #065f46;

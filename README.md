@@ -54,6 +54,7 @@ Abre `http://localhost:3000`.
 - Paginacion de ideas: 20 fragmentos maximo por pagina.
 - El analizador usa cache en memoria con los ultimos 3 textos del proyecto para dar mejor contexto sin consultar BD en cada request.
 - Cada 10 fragmentos se genera automaticamente un resumen corto para mantener el hilo del libro.
+- Los resumenes se muestran dentro de la misma lista de ideas, en el punto correspondiente del bloque.
 
 ## Notas
 
