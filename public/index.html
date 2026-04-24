@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Booky</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="top">
+        <div>
+          <p class="eyebrow">booky</p>
+          <h1>Notas por voz de libros</h1>
+        </div>
+      </header>
+
+      <nav class="tabs">
+        <button id="tabApp" class="tab active" type="button">App</button>
+        <button id="tabSettings" class="tab" type="button">Settings</button>
+      </nav>
+
+      <section id="viewApp" class="view active">
+        <section class="card">
+          <h2>Proyecto</h2>
+          <div class="project-controls">
+            <label for="projectSelect" class="label">Seleccionar proyecto</label>
+            <select id="projectSelect" class="input"></select>
+            <form id="createProjectForm" class="create-project">
+              <input
+                id="newProjectInput"
+                class="input"
+                type="text"
+                placeholder="Nuevo proyecto (ej: Habitos atomicos)"
+                maxlength="80"
+                required
+              />
+              <button class="button secondary" type="submit">Crear</button>
+            </form>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Grabacion</h2>
+          <button id="micButton" class="button mic" type="button" disabled>Activar microfono</button>
+          <p id="statusText" class="status">Selecciona o crea un proyecto para empezar.</p>
+
+          <div class="live-box">
+            <p class="label">Transcripcion en vivo</p>
+            <p id="liveTranscript" class="live-text">...</p>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Ideas del proyecto</h2>
+          <div id="fragmentsList" class="fragments"></div>
+          <div class="pagination">
+            <button id="prevPageButton" class="button secondary tiny" type="button">Anterior</button>
+            <p id="paginationText" class="status pagination-text">Pagina 1 de 1</p>
+            <button id="nextPageButton" class="button secondary tiny" type="button">Siguiente</button>
+          </div>
+        </section>
+      </section>
+
+      <section id="viewSettings" class="view">
+        <section class="card">
+          <h2>Modelo LLM</h2>
+          <button id="refreshModelsButton" class="button secondary tiny" type="button">
+            Recargar modelos
+          </button>
+          <label for="modelSelect" class="label">Modelos disponibles por API</label>
+          <select id="modelSelect" class="input"></select>
+        </section>
+
+        <section class="card">
+          <h2>Prompts</h2>
+          <label for="ideaPromptInput" class="label">Prompt para extraer idea del fragmento</label>
+          <textarea
+            id="ideaPromptInput"
+            class="input prompt-area"
+            placeholder="Escribe el prompt del analizador de ideas"
+          ></textarea>
+          <button id="saveSettingsButton" class="button mic save-button" type="button">
+            Guardar settings
+          </button>
+          <p id="settingsStatus" class="status"></p>
+        </section>
+      </section>
+    </main>
+
+    <template id="fragmentTemplate">
+      <article class="fragment">
+        <div class="fragment-head">
+          <p class="fragment-time"></p>
+          <div class="fragment-actions">
+            <button class="button tiny secondary fragment-toggle" type="button">Ver texto</button>
+            <button class="button tiny danger fragment-delete" type="button">Borrar</button>
+          </div>
+        </div>
+        <p class="fragment-idea"></p>
+        <div class="fragment-text-box hidden">
+          <p class="fragment-text"></p>
+        </div>
+      </article>
+    </template>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
