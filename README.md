@@ -44,6 +44,7 @@ Abre `http://localhost:3000`.
 - Pestaña `Settings` para:
   - Elegir el modelo LLM (lista obtenida desde la API de OpenAI).
   - Editar el prompt de extraccion de ideas.
+  - Editar el prompt del resumen automatico por bloques de 10.
 - Los settings se guardan en la base de datos.
 
 ## Escalabilidad de fragmentos
@@ -51,6 +52,8 @@ Abre `http://localhost:3000`.
 - La lista de fragmentos trae solo ideas (sin texto completo).
 - El texto completo de cada fragmento se carga bajo demanda al pulsar `Ver texto`.
 - Paginacion de ideas: 20 fragmentos maximo por pagina.
+- El analizador usa cache en memoria con los ultimos 3 textos del proyecto para dar mejor contexto sin consultar BD en cada request.
+- Cada 10 fragmentos se genera automaticamente un resumen corto para mantener el hilo del libro.
 
 ## Notas
 

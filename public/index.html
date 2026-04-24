@@ -58,6 +58,11 @@
         </section>
 
         <section class="card">
+          <h2>Resumenes cada 10 fragmentos</h2>
+          <div id="blockSummariesList" class="block-summaries"></div>
+        </section>
+
+        <section class="card">
           <h2>Ideas del proyecto</h2>
           <div id="fragmentsList" class="fragments"></div>
           <div class="pagination">
@@ -86,6 +91,14 @@
             class="input prompt-area"
             placeholder="Escribe el prompt del analizador de ideas"
           ></textarea>
+          <label for="blockSummaryPromptInput" class="label">
+            Prompt para resumir cada bloque de 10 fragmentos
+          </label>
+          <textarea
+            id="blockSummaryPromptInput"
+            class="input prompt-area short"
+            placeholder="Escribe el prompt para resumenes por bloque"
+          ></textarea>
           <button id="saveSettingsButton" class="button mic save-button" type="button">
             Guardar settings
           </button>
@@ -107,6 +120,13 @@
         <div class="fragment-text-box hidden">
           <p class="fragment-text"></p>
         </div>
+      </article>
+    </template>
+
+    <template id="blockSummaryTemplate">
+      <article class="block-summary">
+        <p class="block-summary-title"></p>
+        <p class="block-summary-text"></p>
       </article>
     </template>
 

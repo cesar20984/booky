@@ -117,6 +117,10 @@ h2 {
   resize: vertical;
 }
 
+.prompt-area.short {
+  min-height: 110px;
+}
+
 .button {
   font: inherit;
   font-weight: 700;
@@ -173,6 +177,31 @@ h2 {
   display: flex;
   flex-direction: column;
   gap: 0.7rem;
+}
+
+.block-summaries {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.block-summary {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.75rem;
+  background: #f8fafc;
+}
+
+.block-summary-title {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.block-summary-text {
+  margin: 0.45rem 0 0;
+  font-weight: 700;
+  color: #065f46;
 }
 
 .fragment {
