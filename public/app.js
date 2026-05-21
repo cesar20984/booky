@@ -13,6 +13,11 @@ const micButton = document.getElementById("micButton");
 const statusText = document.getElementById("statusText");
 const liveTranscript = document.getElementById("liveTranscript");
 const photoInput = document.getElementById("photoInput");
+const startCameraButton = document.getElementById("startCameraButton");
+const capturePhotoButton = document.getElementById("capturePhotoButton");
+const clearPhotosButton = document.getElementById("clearPhotosButton");
+const cameraPreview = document.getElementById("cameraPreview");
+const photoQueueText = document.getElementById("photoQueueText");
 const processPhotosButton = document.getElementById("processPhotosButton");
 const photoStatus = document.getElementById("photoStatus");
 const fragmentsList = document.getElementById("fragmentsList");
@@ -45,6 +50,8 @@ let recognition = null;
 let pauseTimer = null;
 let currentBuffer = "";
 let interimBuffer = "";
+let cameraStream = null;
+let photoQueue = [];
 
 let availableModels = [];
 const textCache = new Map();
@@ -55,6 +62,8 @@ async function bootstrap() {
   initSpeechRecognition();
   setActiveTab("app");
   await Promise.all([loadProjects(), loadSettings(), loadModels()]);
+  updatePhotoQueueLabel();
+  updatePhotoActions();
 }
 
 tabApp.addEventListener("click", () => setActiveTab("app"));
@@ -70,7 +79,8 @@ projectSelect.addEventListener("change", async () => {
     fragments = [];
     summariesByBlock = new Map();
     fragmentsTotal = 0;
-    processPhotosButton.disabled = true;
+    stopCamera();
+    updatePhotoActions();
     renderFragments();
     updatePagination();
     setStatus("Selecciona o crea un proyecto para empezar.");
@@ -112,12 +122,15 @@ micButton.addEventListener("click", () => {
 
 photoInput.addEventListener("change", () => {
   const count = photoInput.files?.length || 0;
-  processPhotosButton.disabled = !selectedProjectId || count === 0;
-  setPhotoStatus(count ? `${count} foto(s) listas para procesar.` : "");
+  if (count > 0) {
+    setPhotoStatus(`${count} archivo(s) listos para procesar.`);
+  }
+  updatePhotoActions();
 });
 
 processPhotosButton.addEventListener("click", async () => {
-  const files = photoInput.files;
+  const fallbackFiles = photoInput.files ? [...photoInput.files] : [];
+  const files = photoQueue.length ? photoQueue : fallbackFiles;
   if (!selectedProjectId) {
     setPhotoStatus("Selecciona un proyecto primero.", true);
     return;
@@ -144,6 +157,8 @@ processPhotosButton.addEventListener("click", async () => {
     if (!response.ok) throw new Error(payload?.error || "No se pudieron procesar las fotos.");
 
     const createdCount = Number(payload?.createdCount || 0);
+    photoQueue = [];
+    updatePhotoQueueLabel();
     photoInput.value = "";
     setPhotoStatus(
       `Listo. Se agregaron ${createdCount} fragmento(s) desde fotos. Las imagenes no fueron guardadas.`
@@ -156,9 +171,60 @@ processPhotosButton.addEventListener("click", async () => {
   } catch (error) {
     setPhotoStatus(error.message, true);
   } finally {
-    const count = photoInput.files?.length || 0;
-    processPhotosButton.disabled = !selectedProjectId || count === 0;
+    updatePhotoActions();
   }
+});
+
+startCameraButton.addEventListener("click", async () => {
+  if (cameraStream) {
+    stopCamera();
+    setPhotoStatus("Camara cerrada.");
+    return;
+  }
+
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: "environment" }
+      },
+      audio: false
+    });
+    cameraPreview.srcObject = cameraStream;
+    cameraPreview.classList.remove("hidden");
+    startCameraButton.textContent = "Cerrar camara";
+    setPhotoStatus("Camara lista. Toma fotos en orden de pagina.");
+  } catch (_error) {
+    setPhotoStatus("No se pudo abrir la camara. Revisa permisos.", true);
+  } finally {
+    updatePhotoActions();
+  }
+});
+
+capturePhotoButton.addEventListener("click", async () => {
+  if (!cameraStream) {
+    setPhotoStatus("Primero abre la camara.", true);
+    return;
+  }
+  try {
+    const blob = await captureFrameAsJpegBlob(cameraPreview);
+    const file = new File([blob], `page-${photoQueue.length + 1}.jpg`, { type: "image/jpeg" });
+    photoQueue.push(file);
+    updatePhotoQueueLabel();
+    photoInput.value = "";
+    setPhotoStatus(`Foto ${photoQueue.length} capturada.`);
+  } catch (_error) {
+    setPhotoStatus("No se pudo capturar la foto.", true);
+  } finally {
+    updatePhotoActions();
+  }
+});
+
+clearPhotosButton.addEventListener("click", () => {
+  photoQueue = [];
+  photoInput.value = "";
+  updatePhotoQueueLabel();
+  updatePhotoActions();
+  setPhotoStatus("Lote limpiado.");
 });
 
 prevPageButton.addEventListener("click", async () => {
@@ -368,7 +434,7 @@ async function loadProjects(preferredProjectId = "") {
 
     projectSelect.value = selectedProjectId;
     micButton.disabled = !selectedProjectId;
-    processPhotosButton.disabled = !selectedProjectId || !(photoInput.files?.length > 0);
+    updatePhotoActions();
 
     if (selectedProjectId) {
       await loadFragments();
@@ -619,6 +685,61 @@ function setSettingsStatus(text, isError = false) {
 function setPhotoStatus(text, isError = false) {
   photoStatus.textContent = text;
   photoStatus.classList.toggle("error", isError);
+}
+
+function updatePhotoActions() {
+  const fallbackCount = photoInput.files?.length || 0;
+  const totalQueued = photoQueue.length || fallbackCount;
+  processPhotosButton.disabled = !selectedProjectId || totalQueued === 0;
+  capturePhotoButton.disabled = !selectedProjectId || !cameraStream;
+  clearPhotosButton.disabled = totalQueued === 0;
+}
+
+function updatePhotoQueueLabel() {
+  photoQueueText.textContent = `${photoQueue.length} foto(s) en lote.`;
+}
+
+function stopCamera() {
+  if (!cameraStream) return;
+  for (const track of cameraStream.getTracks()) {
+    track.stop();
+  }
+  cameraStream = null;
+  cameraPreview.srcObject = null;
+  cameraPreview.classList.add("hidden");
+  startCameraButton.textContent = "Abrir camara";
+  updatePhotoActions();
+}
+
+function captureFrameAsJpegBlob(videoElement) {
+  return new Promise((resolve, reject) => {
+    const width = videoElement.videoWidth;
+    const height = videoElement.videoHeight;
+    if (!width || !height) {
+      reject(new Error("Camera not ready"));
+      return;
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      reject(new Error("Canvas context unavailable"));
+      return;
+    }
+    ctx.drawImage(videoElement, 0, 0, width, height);
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          reject(new Error("Blob capture failed"));
+          return;
+        }
+        resolve(blob);
+      },
+      "image/jpeg",
+      0.9
+    );
+  });
 }
 
 function isDeleteCommand(text) {

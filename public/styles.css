@@ -181,6 +181,37 @@ h2 {
   width: 100%;
 }
 
+.camera-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+  margin-top: 0.6rem;
+}
+
+.camera-controls .danger {
+  grid-column: 1 / -1;
+}
+
+.camera-preview {
+  width: 100%;
+  margin-top: 0.75rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #0f172a;
+  max-height: 48vh;
+  object-fit: cover;
+}
+
+.upload-fallback {
+  margin-top: 0.8rem;
+}
+
+.upload-fallback summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .live-text {
   margin: 0.45rem 0 0;
   white-space: pre-wrap;

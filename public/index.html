@@ -58,12 +58,30 @@
           </div>
 
           <div class="photo-box">
-            <p class="label">Modo fotos (paginas en orden)</p>
-            <input id="photoInput" class="input" type="file" accept="image/*" capture="environment" multiple />
+            <p class="label">Modo principal: tomar fotos en lote (en orden)</p>
+            <div class="camera-controls">
+              <button id="startCameraButton" class="button secondary" type="button">
+                Abrir camara
+              </button>
+              <button id="capturePhotoButton" class="button secondary" type="button" disabled>
+                Tomar foto
+              </button>
+              <button id="clearPhotosButton" class="button danger tiny" type="button" disabled>
+                Limpiar lote
+              </button>
+            </div>
+            <video id="cameraPreview" class="camera-preview hidden" autoplay playsinline muted></video>
+            <p id="photoQueueText" class="status">0 fotos en lote.</p>
+
             <button id="processPhotosButton" class="button secondary" type="button" disabled>
-              Procesar fotos del libro
+              Procesar lote de fotos
             </button>
             <p id="photoStatus" class="status"></p>
+
+            <details class="upload-fallback">
+              <summary>Alternativa: subir archivos</summary>
+              <input id="photoInput" class="input" type="file" accept="image/*" multiple />
+            </details>
           </div>
         </section>
 

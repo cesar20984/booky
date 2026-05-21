@@ -41,7 +41,8 @@ Abre `http://localhost:3000`.
 
 ### Modo fotos del libro
 
-- Puedes seleccionar/tomar varias fotos en orden de pagina desde el movil.
+- Puedes tomar fotos en lote desde la camara integrada de la app (flujo principal) y mantener el orden de pagina.
+- Tambien existe una alternativa secundaria para subir archivos de imagen.
 - Booky extrae parrafos de cada imagen y crea fragmentos con idea exactamente igual que en voz.
 - Las fotos solo se procesan en memoria para analizarlas y no se guardan en disco ni en base de datos.
 
