@@ -137,7 +137,13 @@ photoInput.addEventListener("change", () => {
 
 processPhotosButton.addEventListener("click", async () => {
   const fallbackFiles = photoInput.files ? [...photoInput.files] : [];
-  const files = photoQueue.length ? photoQueue : fallbackFiles;
+  if (!photoQueue.length && fallbackFiles.length) {
+    photoQueue = [...fallbackFiles];
+    photoInput.value = "";
+    updatePhotoQueueLabel();
+    renderPhotoQueueList();
+  }
+  const files = photoQueue;
   if (!selectedProjectId) {
     setPhotoStatus("Selecciona un proyecto primero.", true);
     return;
@@ -148,32 +154,28 @@ processPhotosButton.addEventListener("click", async () => {
   }
 
   try {
-    setPhotoStatus(`Procesando 0/${files.length} foto(s)...`);
+    const initialTotal = files.length;
+    let createdCount = 0;
+    let processedCount = 0;
+    setPhotoStatus(`Procesando 0/${initialTotal} foto(s)...`);
     processPhotosButton.disabled = true;
     hideProcessCta();
     stopCamera();
 
-    let createdCount = 0;
-    for (let i = 0; i < files.length; i += 1) {
-      setPhotoStatus(`Procesando ${i + 1}/${files.length} foto(s)...`);
-      const formData = new FormData();
-      formData.append("photos", files[i]);
+    while (photoQueue.length > 0) {
+      const currentFile = photoQueue[0];
+      setPhotoStatus(`Procesando ${processedCount + 1}/${initialTotal} foto(s)...`);
 
-      const response = await fetch(`/api/projects/${selectedProjectId}/photos/analyze`, {
-        method: "POST",
-        body: formData
-      });
-      const payload = await safeReadJson(response);
-      if (!response.ok) throw new Error(payload?.error || "No se pudieron procesar las fotos.");
+      const payload = await processSinglePhotoWithRetry(selectedProjectId, currentFile, 2);
       createdCount += Number(payload?.createdCount || 0);
+      processedCount += 1;
+
+      photoQueue.shift();
+      updatePhotoQueueLabel();
+      renderPhotoQueueList();
     }
 
-    photoQueue = [];
-    updatePhotoQueueLabel();
-    clearPhotoQueueUrls();
-    renderPhotoQueueList();
     hideProcessCta();
-    photoInput.value = "";
     setPhotoStatus(
       `Listo. Se agregaron ${createdCount} fragmento(s) desde fotos. Las imagenes no fueron guardadas.`
     );
@@ -183,7 +185,14 @@ processPhotosButton.addEventListener("click", async () => {
     await loadProjects(selectedProjectId);
     await loadFragments();
   } catch (error) {
-    setPhotoStatus(error.message, true);
+    const remaining = photoQueue.length;
+    setPhotoStatus(
+      `${error.message}. Quedaron ${remaining} foto(s) pendientes en el lote para reintentar.`,
+      true
+    );
+    if (remaining > 0) {
+      showProcessCta();
+    }
   } finally {
     updatePhotoActions();
   }
@@ -819,6 +828,36 @@ function captureFrameAsJpegBlob(videoElement) {
       0.9
     );
   });
+}
+
+async function processSinglePhotoWithRetry(projectId, file, retries) {
+  let attempt = 0;
+  let lastError = "Error procesando foto.";
+
+  while (attempt <= retries) {
+    try {
+      const formData = new FormData();
+      formData.append("photos", file);
+
+      const response = await fetch(`/api/projects/${projectId}/photos/analyze`, {
+        method: "POST",
+        body: formData
+      });
+      const payload = await safeReadJson(response);
+      if (!response.ok) {
+        throw new Error(payload?.error || "No se pudo procesar una foto.");
+      }
+      return payload || {};
+    } catch (error) {
+      lastError = error.message || "Error procesando foto.";
+      attempt += 1;
+      if (attempt <= retries) {
+        setPhotoStatus(`Reintentando foto (${attempt}/${retries})...`);
+      }
+    }
+  }
+
+  throw new Error(lastError);
 }
 
 function showProcessCta() {
