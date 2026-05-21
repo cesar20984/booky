@@ -19,6 +19,7 @@ const clearPhotosButton = document.getElementById("clearPhotosButton");
 const cameraShell = document.getElementById("cameraShell");
 const cameraPreview = document.getElementById("cameraPreview");
 const photoQueueText = document.getElementById("photoQueueText");
+const photoQueueList = document.getElementById("photoQueueList");
 const processPhotosButton = document.getElementById("processPhotosButton");
 const photoStatus = document.getElementById("photoStatus");
 const processPhotosCta = document.getElementById("processPhotosCta");
@@ -56,6 +57,7 @@ let currentBuffer = "";
 let interimBuffer = "";
 let cameraStream = null;
 let photoQueue = [];
+let photoQueueUrls = [];
 
 let availableModels = [];
 const textCache = new Map();
@@ -67,6 +69,7 @@ async function bootstrap() {
   setActiveTab("app");
   await Promise.all([loadProjects(), loadSettings(), loadModels()]);
   updatePhotoQueueLabel();
+  renderPhotoQueueList();
   updatePhotoActions();
 }
 
@@ -167,6 +170,8 @@ processPhotosButton.addEventListener("click", async () => {
 
     photoQueue = [];
     updatePhotoQueueLabel();
+    clearPhotoQueueUrls();
+    renderPhotoQueueList();
     hideProcessCta();
     photoInput.value = "";
     setPhotoStatus(
@@ -225,6 +230,7 @@ capturePhotoButton.addEventListener("click", async () => {
     const file = new File([blob], `page-${photoQueue.length + 1}.jpg`, { type: "image/jpeg" });
     photoQueue.push(file);
     updatePhotoQueueLabel();
+    renderPhotoQueueList();
     showProcessCta();
     photoInput.value = "";
     setPhotoStatus(`Foto ${photoQueue.length} capturada.`);
@@ -237,8 +243,10 @@ capturePhotoButton.addEventListener("click", async () => {
 
 clearPhotosButton.addEventListener("click", () => {
   photoQueue = [];
+  clearPhotoQueueUrls();
   photoInput.value = "";
   updatePhotoQueueLabel();
+  renderPhotoQueueList();
   hideProcessCta();
   updatePhotoActions();
   setPhotoStatus("Lote limpiado.");
@@ -714,6 +722,57 @@ function updatePhotoActions() {
 
 function updatePhotoQueueLabel() {
   photoQueueText.textContent = `${photoQueue.length} foto(s) en lote.`;
+}
+
+function renderPhotoQueueList() {
+  clearPhotoQueueUrls();
+  photoQueueList.innerHTML = "";
+  if (!photoQueue.length) return;
+
+  photoQueue.forEach((file, index) => {
+    const url = URL.createObjectURL(file);
+    photoQueueUrls.push(url);
+
+    const row = document.createElement("div");
+    row.className = "photo-queue-item";
+
+    const img = document.createElement("img");
+    img.className = "photo-queue-thumb";
+    img.src = url;
+    img.alt = `Foto ${index + 1}`;
+
+    const label = document.createElement("p");
+    label.className = "photo-queue-label";
+    label.textContent = `Foto ${index + 1}`;
+
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "button tiny danger";
+    removeButton.textContent = "Eliminar";
+    removeButton.addEventListener("click", () => {
+      photoQueue.splice(index, 1);
+      updatePhotoQueueLabel();
+      renderPhotoQueueList();
+      updatePhotoActions();
+      if (!photoQueue.length) {
+        hideProcessCta();
+      } else {
+        showProcessCta();
+      }
+    });
+
+    row.appendChild(img);
+    row.appendChild(label);
+    row.appendChild(removeButton);
+    photoQueueList.appendChild(row);
+  });
+}
+
+function clearPhotoQueueUrls() {
+  for (const url of photoQueueUrls) {
+    URL.revokeObjectURL(url);
+  }
+  photoQueueUrls = [];
 }
 
 function stopCamera() {
