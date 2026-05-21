@@ -1,5 +1,8 @@
 const PAUSE_MS = 2000;
 const PAGE_SIZE = 20;
+const PHOTO_QUEUE_DB_NAME = "booky_photo_queue_db";
+const PHOTO_QUEUE_STORE = "queue";
+const PHOTO_QUEUE_KEY = "pending_photos_v1";
 
 const tabApp = document.getElementById("tabApp");
 const tabSettings = document.getElementById("tabSettings");
@@ -58,6 +61,7 @@ let interimBuffer = "";
 let cameraStream = null;
 let photoQueue = [];
 let photoQueueUrls = [];
+let photoQueueDbPromise = null;
 
 let availableModels = [];
 const textCache = new Map();
@@ -67,6 +71,7 @@ bootstrap();
 async function bootstrap() {
   initSpeechRecognition();
   setActiveTab("app");
+  await loadPersistedPhotoQueue();
   await Promise.all([loadProjects(), loadSettings(), loadModels()]);
   updatePhotoQueueLabel();
   renderPhotoQueueList();
@@ -130,7 +135,18 @@ micButton.addEventListener("click", () => {
 photoInput.addEventListener("change", () => {
   const count = photoInput.files?.length || 0;
   if (count > 0) {
+    photoQueue = [...photoInput.files];
+    void persistPhotoQueue();
+    updatePhotoQueueLabel();
+    renderPhotoQueueList();
+    showProcessCta();
     setPhotoStatus(`${count} archivo(s) listos para procesar.`);
+  } else {
+    photoQueue = [];
+    void persistPhotoQueue();
+    updatePhotoQueueLabel();
+    renderPhotoQueueList();
+    hideProcessCta();
   }
   updatePhotoActions();
 });
@@ -139,6 +155,7 @@ processPhotosButton.addEventListener("click", async () => {
   const fallbackFiles = photoInput.files ? [...photoInput.files] : [];
   if (!photoQueue.length && fallbackFiles.length) {
     photoQueue = [...fallbackFiles];
+    await persistPhotoQueue();
     photoInput.value = "";
     updatePhotoQueueLabel();
     renderPhotoQueueList();
@@ -171,6 +188,7 @@ processPhotosButton.addEventListener("click", async () => {
       processedCount += 1;
 
       photoQueue.shift();
+      await persistPhotoQueue();
       updatePhotoQueueLabel();
       renderPhotoQueueList();
     }
@@ -238,6 +256,7 @@ capturePhotoButton.addEventListener("click", async () => {
     const blob = await captureFrameAsJpegBlob(cameraPreview);
     const file = new File([blob], `page-${photoQueue.length + 1}.jpg`, { type: "image/jpeg" });
     photoQueue.push(file);
+    await persistPhotoQueue();
     updatePhotoQueueLabel();
     renderPhotoQueueList();
     showProcessCta();
@@ -252,6 +271,7 @@ capturePhotoButton.addEventListener("click", async () => {
 
 clearPhotosButton.addEventListener("click", () => {
   photoQueue = [];
+  void persistPhotoQueue();
   clearPhotoQueueUrls();
   photoInput.value = "";
   updatePhotoQueueLabel();
@@ -760,6 +780,7 @@ function renderPhotoQueueList() {
     removeButton.textContent = "Eliminar";
     removeButton.addEventListener("click", () => {
       photoQueue.splice(index, 1);
+      void persistPhotoQueue();
       updatePhotoQueueLabel();
       renderPhotoQueueList();
       updatePhotoActions();
@@ -782,6 +803,69 @@ function clearPhotoQueueUrls() {
     URL.revokeObjectURL(url);
   }
   photoQueueUrls = [];
+}
+
+function getPhotoQueueDb() {
+  if (!("indexedDB" in window)) return Promise.resolve(null);
+  if (photoQueueDbPromise) return photoQueueDbPromise;
+
+  photoQueueDbPromise = new Promise((resolve) => {
+    const request = indexedDB.open(PHOTO_QUEUE_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(PHOTO_QUEUE_STORE)) {
+        db.createObjectStore(PHOTO_QUEUE_STORE);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => resolve(null);
+  });
+
+  return photoQueueDbPromise;
+}
+
+async function persistPhotoQueue() {
+  const db = await getPhotoQueueDb();
+  if (!db) return;
+
+  await new Promise((resolve) => {
+    const tx = db.transaction(PHOTO_QUEUE_STORE, "readwrite");
+    const store = tx.objectStore(PHOTO_QUEUE_STORE);
+    const payload = photoQueue.map((file) => ({
+      blob: file,
+      name: file.name || `page-${Date.now()}.jpg`,
+      type: file.type || "image/jpeg",
+      lastModified: file.lastModified || Date.now()
+    }));
+    store.put(payload, PHOTO_QUEUE_KEY);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => resolve();
+    tx.onabort = () => resolve();
+  });
+}
+
+async function loadPersistedPhotoQueue() {
+  const db = await getPhotoQueueDb();
+  if (!db) return;
+
+  const persisted = await new Promise((resolve) => {
+    const tx = db.transaction(PHOTO_QUEUE_STORE, "readonly");
+    const store = tx.objectStore(PHOTO_QUEUE_STORE);
+    const req = store.get(PHOTO_QUEUE_KEY);
+    req.onsuccess = () => resolve(Array.isArray(req.result) ? req.result : []);
+    req.onerror = () => resolve([]);
+  });
+
+  photoQueue = persisted
+    .map((item, index) => {
+      if (!item?.blob) return null;
+      if (item.blob instanceof File) return item.blob;
+      return new File([item.blob], item.name || `page-${index + 1}.jpg`, {
+        type: item.type || "image/jpeg",
+        lastModified: item.lastModified || Date.now()
+      });
+    })
+    .filter(Boolean);
 }
 
 function stopCamera() {
