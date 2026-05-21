@@ -16,10 +16,14 @@ const photoInput = document.getElementById("photoInput");
 const startCameraButton = document.getElementById("startCameraButton");
 const capturePhotoButton = document.getElementById("capturePhotoButton");
 const clearPhotosButton = document.getElementById("clearPhotosButton");
+const cameraShell = document.getElementById("cameraShell");
 const cameraPreview = document.getElementById("cameraPreview");
 const photoQueueText = document.getElementById("photoQueueText");
 const processPhotosButton = document.getElementById("processPhotosButton");
 const photoStatus = document.getElementById("photoStatus");
+const processPhotosCta = document.getElementById("processPhotosCta");
+const processPhotosCtaText = document.getElementById("processPhotosCtaText");
+const processPhotosCtaButton = document.getElementById("processPhotosCtaButton");
 const fragmentsList = document.getElementById("fragmentsList");
 const fragmentTemplate = document.getElementById("fragmentTemplate");
 const inlineSummaryTemplate = document.getElementById("inlineSummaryTemplate");
@@ -159,6 +163,7 @@ processPhotosButton.addEventListener("click", async () => {
     const createdCount = Number(payload?.createdCount || 0);
     photoQueue = [];
     updatePhotoQueueLabel();
+    hideProcessCta();
     photoInput.value = "";
     setPhotoStatus(
       `Listo. Se agregaron ${createdCount} fragmento(s) desde fotos. Las imagenes no fueron guardadas.`
@@ -175,6 +180,10 @@ processPhotosButton.addEventListener("click", async () => {
   }
 });
 
+processPhotosCtaButton.addEventListener("click", async () => {
+  processPhotosButton.click();
+});
+
 startCameraButton.addEventListener("click", async () => {
   if (cameraStream) {
     stopCamera();
@@ -185,12 +194,15 @@ startCameraButton.addEventListener("click", async () => {
   try {
     cameraStream = await navigator.mediaDevices.getUserMedia({
       video: {
-        facingMode: { ideal: "environment" }
+        facingMode: { ideal: "environment" },
+        aspectRatio: { ideal: 9 / 16 }
       },
       audio: false
     });
     cameraPreview.srcObject = cameraStream;
-    cameraPreview.classList.remove("hidden");
+    cameraShell.classList.remove("hidden");
+    await requestCameraFullscreen();
+    await tryLockPortraitOrientation();
     startCameraButton.textContent = "Cerrar camara";
     setPhotoStatus("Camara lista. Toma fotos en orden de pagina.");
   } catch (_error) {
@@ -210,6 +222,7 @@ capturePhotoButton.addEventListener("click", async () => {
     const file = new File([blob], `page-${photoQueue.length + 1}.jpg`, { type: "image/jpeg" });
     photoQueue.push(file);
     updatePhotoQueueLabel();
+    showProcessCta();
     photoInput.value = "";
     setPhotoStatus(`Foto ${photoQueue.length} capturada.`);
   } catch (_error) {
@@ -223,6 +236,7 @@ clearPhotosButton.addEventListener("click", () => {
   photoQueue = [];
   photoInput.value = "";
   updatePhotoQueueLabel();
+  hideProcessCta();
   updatePhotoActions();
   setPhotoStatus("Lote limpiado.");
 });
@@ -706,7 +720,9 @@ function stopCamera() {
   }
   cameraStream = null;
   cameraPreview.srcObject = null;
-  cameraPreview.classList.add("hidden");
+  cameraShell.classList.add("hidden");
+  void unlockOrientation();
+  void exitFullscreenIfAny();
   startCameraButton.textContent = "Abrir camara";
   updatePhotoActions();
 }
@@ -740,6 +756,58 @@ function captureFrameAsJpegBlob(videoElement) {
       0.9
     );
   });
+}
+
+function showProcessCta() {
+  const queued = photoQueue.length || photoInput.files?.length || 0;
+  if (!queued) return;
+  processPhotosCtaText.textContent = `${queued} foto(s) listas. Procesa ahora.`;
+  processPhotosCta.classList.remove("hidden");
+}
+
+function hideProcessCta() {
+  processPhotosCta.classList.add("hidden");
+}
+
+async function requestCameraFullscreen() {
+  try {
+    if (!cameraShell.requestFullscreen) return;
+    if (!document.fullscreenElement) {
+      await cameraShell.requestFullscreen();
+    }
+  } catch (_error) {
+    // Not all iOS browsers support/allow fullscreen.
+  }
+}
+
+async function exitFullscreenIfAny() {
+  try {
+    if (document.fullscreenElement && document.exitFullscreen) {
+      await document.exitFullscreen();
+    }
+  } catch (_error) {
+    // Ignore unsupported cases.
+  }
+}
+
+async function tryLockPortraitOrientation() {
+  try {
+    if (screen.orientation && screen.orientation.lock) {
+      await screen.orientation.lock("portrait");
+    }
+  } catch (_error) {
+    // iOS Safari usually blocks this; keep layout portrait as fallback.
+  }
+}
+
+async function unlockOrientation() {
+  try {
+    if (screen.orientation && screen.orientation.unlock) {
+      screen.orientation.unlock();
+    }
+  } catch (_error) {
+    // Ignore unsupported cases.
+  }
 }
 
 function isDeleteCommand(text) {

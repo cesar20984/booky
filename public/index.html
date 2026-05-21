@@ -59,18 +59,22 @@
 
           <div class="photo-box">
             <p class="label">Modo principal: tomar fotos en lote (en orden)</p>
-            <div class="camera-controls">
+            <div class="camera-controls top-controls">
               <button id="startCameraButton" class="button secondary" type="button">
                 Abrir camara
-              </button>
-              <button id="capturePhotoButton" class="button secondary" type="button" disabled>
-                Tomar foto
               </button>
               <button id="clearPhotosButton" class="button danger tiny" type="button" disabled>
                 Limpiar lote
               </button>
             </div>
-            <video id="cameraPreview" class="camera-preview hidden" autoplay playsinline muted></video>
+            <div id="cameraShell" class="camera-shell hidden">
+              <video id="cameraPreview" class="camera-preview" autoplay playsinline muted></video>
+              <div class="camera-bottom-bar">
+                <button id="capturePhotoButton" class="shutter-button" type="button" disabled>
+                  Tomar siguiente
+                </button>
+              </div>
+            </div>
             <p id="photoQueueText" class="status">0 fotos en lote.</p>
 
             <button id="processPhotosButton" class="button secondary" type="button" disabled>
@@ -160,6 +164,13 @@
         <p class="inline-summary-text"></p>
       </article>
     </template>
+
+    <div id="processPhotosCta" class="process-cta hidden">
+      <p id="processPhotosCtaText">Fotos listas para procesar</p>
+      <button id="processPhotosCtaButton" class="button mic" type="button">
+        Procesar ahora
+      </button>
+    </div>
 
     <script src="./app.js"></script>
   </body>
