@@ -145,22 +145,26 @@ processPhotosButton.addEventListener("click", async () => {
   }
 
   try {
-    setPhotoStatus(`Procesando ${files.length} foto(s)...`);
+    setPhotoStatus(`Procesando 0/${files.length} foto(s)...`);
     processPhotosButton.disabled = true;
+    hideProcessCta();
+    stopCamera();
 
-    const formData = new FormData();
-    for (const file of files) {
-      formData.append("photos", file);
+    let createdCount = 0;
+    for (let i = 0; i < files.length; i += 1) {
+      setPhotoStatus(`Procesando ${i + 1}/${files.length} foto(s)...`);
+      const formData = new FormData();
+      formData.append("photos", files[i]);
+
+      const response = await fetch(`/api/projects/${selectedProjectId}/photos/analyze`, {
+        method: "POST",
+        body: formData
+      });
+      const payload = await safeReadJson(response);
+      if (!response.ok) throw new Error(payload?.error || "No se pudieron procesar las fotos.");
+      createdCount += Number(payload?.createdCount || 0);
     }
 
-    const response = await fetch(`/api/projects/${selectedProjectId}/photos/analyze`, {
-      method: "POST",
-      body: formData
-    });
-    const payload = await safeReadJson(response);
-    if (!response.ok) throw new Error(payload?.error || "No se pudieron procesar las fotos.");
-
-    const createdCount = Number(payload?.createdCount || 0);
     photoQueue = [];
     updatePhotoQueueLabel();
     hideProcessCta();
@@ -194,8 +198,7 @@ startCameraButton.addEventListener("click", async () => {
   try {
     cameraStream = await navigator.mediaDevices.getUserMedia({
       video: {
-        facingMode: { ideal: "environment" },
-        aspectRatio: { ideal: 9 / 16 }
+        facingMode: { ideal: "environment" }
       },
       audio: false
     });
@@ -721,6 +724,7 @@ function stopCamera() {
   cameraStream = null;
   cameraPreview.srcObject = null;
   cameraShell.classList.add("hidden");
+  hideProcessCta();
   void unlockOrientation();
   void exitFullscreenIfAny();
   startCameraButton.textContent = "Abrir camara";
@@ -760,7 +764,7 @@ function captureFrameAsJpegBlob(videoElement) {
 
 function showProcessCta() {
   const queued = photoQueue.length || photoInput.files?.length || 0;
-  if (!queued) return;
+  if (!queued || !cameraStream) return;
   processPhotosCtaText.textContent = `${queued} foto(s) listas. Procesa ahora.`;
   processPhotosCta.classList.remove("hidden");
 }
