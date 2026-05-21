@@ -56,6 +56,15 @@
             <p class="label">Transcripcion en vivo</p>
             <p id="liveTranscript" class="live-text">...</p>
           </div>
+
+          <div class="photo-box">
+            <p class="label">Modo fotos (paginas en orden)</p>
+            <input id="photoInput" class="input" type="file" accept="image/*" capture="environment" multiple />
+            <button id="processPhotosButton" class="button secondary" type="button" disabled>
+              Procesar fotos del libro
+            </button>
+            <p id="photoStatus" class="status"></p>
+          </div>
         </section>
 
         <section class="card">
@@ -94,6 +103,14 @@
             id="blockSummaryPromptInput"
             class="input prompt-area short"
             placeholder="Escribe el prompt para resumenes por bloque"
+          ></textarea>
+          <label for="imageExtractPromptInput" class="label">
+            Prompt para extraer parrafos desde fotos
+          </label>
+          <textarea
+            id="imageExtractPromptInput"
+            class="input prompt-area short"
+            placeholder="Escribe el prompt para extraer texto de imagenes"
           ></textarea>
           <button id="saveSettingsButton" class="button mic save-button" type="button">
             Guardar settings

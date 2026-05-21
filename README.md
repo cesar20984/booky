@@ -39,6 +39,12 @@ Abre `http://localhost:3000`.
 5. Ese fragmento se envia al backend y OpenAI devuelve la idea principal.
 6. Todo queda guardado en Postgres (Neon).
 
+### Modo fotos del libro
+
+- Puedes seleccionar/tomar varias fotos en orden de pagina desde el movil.
+- Booky extrae parrafos de cada imagen y crea fragmentos con idea exactamente igual que en voz.
+- Las fotos solo se procesan en memoria para analizarlas y no se guardan en disco ni en base de datos.
+
 ## Settings
 
 - Pestaña `Settings` para:

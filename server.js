@@ -1,6 +1,7 @@
 const path = require("path");
 const crypto = require("crypto");
 const express = require("express");
+const multer = require("multer");
 const dotenv = require("dotenv");
 const { Pool } = require("pg");
 const OpenAI = require("openai");
@@ -29,12 +30,21 @@ const DEFAULT_PROMPTS = {
   ideaPrompt:
     "You read a spoken text fragment and return only the core idea in one short sentence, in Spanish.",
   blockSummaryPrompt:
-    "You receive 10 consecutive text fragments from a book note session. Write a short Spanish summary that keeps narrative continuity and highlights the key ideas."
+    "You receive 10 consecutive text fragments from a book note session. Write a short Spanish summary that keeps narrative continuity and highlights the key ideas.",
+  imageExtractPrompt:
+    "Extract readable book text from the image and return ONLY JSON with this shape: {\"page_number\": number|null, \"paragraphs\": string[]}. Keep paragraph order from top to bottom. Exclude headers/footers/page numbers when possible. Do not include commentary."
 };
 
 const recentTextsCache = new Map();
 const fragmentCountCache = new Map();
 const summaryJobs = new Map();
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    files: 30,
+    fileSize: 10 * 1024 * 1024
+  }
+});
 
 const initPromise = initDatabase().then(initRuntimeCaches);
 
@@ -148,6 +158,122 @@ function updateRecentTextsCache(projectId, text) {
 function getRecentContext(projectId) {
   const cached = recentTextsCache.get(projectId) || [];
   return [...cached].reverse();
+}
+
+function getPageDataUrl(file) {
+  const mimeType = file.mimetype || "image/jpeg";
+  return `data:${mimeType};base64,${file.buffer.toString("base64")}`;
+}
+
+function parseJsonObjectFromText(text) {
+  const trimmed = String(text || "").trim();
+  if (!trimmed) return null;
+  try {
+    return JSON.parse(trimmed);
+  } catch (_error) {
+    // Continue trying from fenced/embedded JSON.
+  }
+
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) {
+    try {
+      return JSON.parse(fenced[1].trim());
+    } catch (_error) {
+      // Continue trying.
+    }
+  }
+
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    const candidate = trimmed.slice(start, end + 1);
+    try {
+      return JSON.parse(candidate);
+    } catch (_error) {
+      return null;
+    }
+  }
+  return null;
+}
+
+async function extractParagraphsFromImage(file, settings, pageOrder) {
+  const response = await openai.responses.create({
+    model: settings.selectedModel || defaultModel,
+    input: [
+      {
+        role: "system",
+        content: settings.prompts.imageExtractPrompt || DEFAULT_PROMPTS.imageExtractPrompt
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: `Image order: ${pageOrder}. Extract paragraphs for this book page.`
+          },
+          {
+            type: "input_image",
+            image_url: getPageDataUrl(file)
+          }
+        ]
+      }
+    ],
+    max_output_tokens: 1200
+  });
+
+  const parsed = parseJsonObjectFromText(response.output_text || "");
+  if (!parsed || !Array.isArray(parsed.paragraphs)) return [];
+  return parsed.paragraphs
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+}
+
+async function maybeGenerateNewBlockSummary(projectId, projectName, settings) {
+  const newCount = fragmentCountCache.get(projectId) || 0;
+  if (newCount > 0 && newCount % 10 === 0) {
+    const blockNumber = newCount / 10;
+    void ensureBlockSummaryGenerated(projectId, blockNumber, projectName, settings);
+  }
+}
+
+async function insertAnalyzedFragment(projectId, projectName, text, settings) {
+  const previousContext = getRecentContext(projectId);
+  const contextText = previousContext.length
+    ? previousContext.map((item, index) => `- Context ${index + 1}: ${item}`).join("\n")
+    : "- Context: none";
+
+  const response = await openai.responses.create({
+    model: settings.selectedModel || defaultModel,
+    input: [
+      {
+        role: "system",
+        content: settings.prompts.ideaPrompt || DEFAULT_PROMPTS.ideaPrompt
+      },
+      {
+        role: "user",
+        content: `Project: ${projectName}\nPrevious context:\n${contextText}\nCurrent fragment:\n${text}`
+      }
+    ],
+    max_output_tokens: 100
+  });
+
+  const idea = (response.output_text || "").trim() || "Sin idea generada.";
+  const id = crypto.randomUUID();
+  const insert = await pool.query(
+    `
+    INSERT INTO fragments (id, project_id, text, idea, status)
+    VALUES ($1, $2, $3, $4, $5)
+    RETURNING id, idea, status, created_at AS "createdAt"
+  `,
+    [id, projectId, text, idea, "done"]
+  );
+
+  updateRecentTextsCache(projectId, text);
+  const newCount = (fragmentCountCache.get(projectId) || 0) + 1;
+  fragmentCountCache.set(projectId, newCount);
+  await maybeGenerateNewBlockSummary(projectId, projectName, settings);
+
+  return insert.rows[0];
 }
 
 async function rebuildProjectCaches(projectId) {
@@ -475,52 +601,61 @@ app.post("/api/projects/:projectId/fragments/analyze", async (req, res) => {
     }
 
     const settings = await getSettings();
-    const previousContext = getRecentContext(projectId);
-    const contextText = previousContext.length
-      ? previousContext.map((item, index) => `- Context ${index + 1}: ${item}`).join("\n")
-      : "- Context: none";
-
-    const response = await openai.responses.create({
-      model: settings.selectedModel || defaultModel,
-      input: [
-        {
-          role: "system",
-          content: settings.prompts.ideaPrompt || DEFAULT_PROMPTS.ideaPrompt
-        },
-        {
-          role: "user",
-          content: `Project: ${project.rows[0].name}\nPrevious context:\n${contextText}\nCurrent fragment:\n${text}`
-        }
-      ],
-      max_output_tokens: 100
-    });
-
-    const idea = (response.output_text || "").trim() || "Sin idea generada.";
-    const id = crypto.randomUUID();
-    const insert = await pool.query(
-      `
-      INSERT INTO fragments (id, project_id, text, idea, status)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING id, idea, status, created_at AS "createdAt"
-    `,
-      [id, projectId, text, idea, "done"]
-    );
-
-    updateRecentTextsCache(projectId, text);
-    const newCount = (fragmentCountCache.get(projectId) || 0) + 1;
-    fragmentCountCache.set(projectId, newCount);
-
-    if (newCount % 10 === 0) {
-      const blockNumber = newCount / 10;
-      void ensureBlockSummaryGenerated(projectId, blockNumber, project.rows[0].name, settings);
-    }
-
-    res.status(201).json({ fragment: insert.rows[0] });
+    const fragment = await insertAnalyzedFragment(projectId, project.rows[0].name, text, settings);
+    res.status(201).json({ fragment });
   } catch (error) {
     console.error("Analyze+save error:", error);
     res.status(500).json({ error: "Failed to analyze fragment." });
   }
 });
+
+app.post(
+  "/api/projects/:projectId/photos/analyze",
+  upload.array("photos", 30),
+  async (req, res) => {
+    try {
+      const projectId = req.params.projectId;
+      const project = await pool.query("SELECT id, name FROM projects WHERE id = $1", [projectId]);
+      if (!project.rowCount) return res.status(404).json({ error: "Project not found." });
+
+      if (!openai) {
+        return res.status(500).json({
+          error: "OPENAI_API_KEY is missing. Add it to .env and restart the server."
+        });
+      }
+
+      const files = Array.isArray(req.files) ? req.files : [];
+      if (!files.length) {
+        return res.status(400).json({ error: "No photos uploaded." });
+      }
+
+      const settings = await getSettings();
+      const createdFragments = [];
+
+      // Process photos in provided order. Images are only kept in memory, never on disk.
+      for (let pageIndex = 0; pageIndex < files.length; pageIndex += 1) {
+        const paragraphs = await extractParagraphsFromImage(files[pageIndex], settings, pageIndex + 1);
+        for (const paragraph of paragraphs) {
+          const fragment = await insertAnalyzedFragment(
+            projectId,
+            project.rows[0].name,
+            paragraph,
+            settings
+          );
+          createdFragments.push(fragment);
+        }
+      }
+
+      res.status(201).json({
+        createdCount: createdFragments.length,
+        fragments: createdFragments
+      });
+    } catch (error) {
+      console.error("Photo analyze error:", error);
+      res.status(500).json({ error: "Failed to process photos." });
+    }
+  }
+);
 
 app.get("/api/settings", async (_req, res) => {
   try {

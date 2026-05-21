@@ -168,6 +168,19 @@ h2 {
   background: #f8fafc;
 }
 
+.photo-box {
+  margin-top: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.8rem;
+  background: #f8fafc;
+}
+
+.photo-box .button {
+  margin-top: 0.7rem;
+  width: 100%;
+}
+
 .live-text {
   margin: 0.45rem 0 0;
   white-space: pre-wrap;

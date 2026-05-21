@@ -12,6 +12,9 @@ const newProjectInput = document.getElementById("newProjectInput");
 const micButton = document.getElementById("micButton");
 const statusText = document.getElementById("statusText");
 const liveTranscript = document.getElementById("liveTranscript");
+const photoInput = document.getElementById("photoInput");
+const processPhotosButton = document.getElementById("processPhotosButton");
+const photoStatus = document.getElementById("photoStatus");
 const fragmentsList = document.getElementById("fragmentsList");
 const fragmentTemplate = document.getElementById("fragmentTemplate");
 const inlineSummaryTemplate = document.getElementById("inlineSummaryTemplate");
@@ -23,6 +26,7 @@ const modelSelect = document.getElementById("modelSelect");
 const refreshModelsButton = document.getElementById("refreshModelsButton");
 const ideaPromptInput = document.getElementById("ideaPromptInput");
 const blockSummaryPromptInput = document.getElementById("blockSummaryPromptInput");
+const imageExtractPromptInput = document.getElementById("imageExtractPromptInput");
 const saveSettingsButton = document.getElementById("saveSettingsButton");
 const settingsStatus = document.getElementById("settingsStatus");
 
@@ -34,7 +38,7 @@ let fragmentsTotal = 0;
 let currentPage = 1;
 let totalPages = 1;
 let selectedModel = "";
-let settingsPrompts = { ideaPrompt: "", blockSummaryPrompt: "" };
+let settingsPrompts = { ideaPrompt: "", blockSummaryPrompt: "", imageExtractPrompt: "" };
 
 let listening = false;
 let recognition = null;
@@ -66,6 +70,7 @@ projectSelect.addEventListener("change", async () => {
     fragments = [];
     summariesByBlock = new Map();
     fragmentsTotal = 0;
+    processPhotosButton.disabled = true;
     renderFragments();
     updatePagination();
     setStatus("Selecciona o crea un proyecto para empezar.");
@@ -105,6 +110,57 @@ micButton.addEventListener("click", () => {
   else startListening();
 });
 
+photoInput.addEventListener("change", () => {
+  const count = photoInput.files?.length || 0;
+  processPhotosButton.disabled = !selectedProjectId || count === 0;
+  setPhotoStatus(count ? `${count} foto(s) listas para procesar.` : "");
+});
+
+processPhotosButton.addEventListener("click", async () => {
+  const files = photoInput.files;
+  if (!selectedProjectId) {
+    setPhotoStatus("Selecciona un proyecto primero.", true);
+    return;
+  }
+  if (!files || !files.length) {
+    setPhotoStatus("Selecciona una o mas fotos.", true);
+    return;
+  }
+
+  try {
+    setPhotoStatus(`Procesando ${files.length} foto(s)...`);
+    processPhotosButton.disabled = true;
+
+    const formData = new FormData();
+    for (const file of files) {
+      formData.append("photos", file);
+    }
+
+    const response = await fetch(`/api/projects/${selectedProjectId}/photos/analyze`, {
+      method: "POST",
+      body: formData
+    });
+    const payload = await safeReadJson(response);
+    if (!response.ok) throw new Error(payload?.error || "No se pudieron procesar las fotos.");
+
+    const createdCount = Number(payload?.createdCount || 0);
+    photoInput.value = "";
+    setPhotoStatus(
+      `Listo. Se agregaron ${createdCount} fragmento(s) desde fotos. Las imagenes no fueron guardadas.`
+    );
+
+    textCache.clear();
+    currentPage = 1;
+    await loadProjects(selectedProjectId);
+    await loadFragments();
+  } catch (error) {
+    setPhotoStatus(error.message, true);
+  } finally {
+    const count = photoInput.files?.length || 0;
+    processPhotosButton.disabled = !selectedProjectId || count === 0;
+  }
+});
+
 prevPageButton.addEventListener("click", async () => {
   if (currentPage <= 1) return;
   currentPage -= 1;
@@ -125,6 +181,7 @@ saveSettingsButton.addEventListener("click", async () => {
   const model = modelSelect.value;
   const ideaPrompt = ideaPromptInput.value.trim();
   const blockSummaryPrompt = blockSummaryPromptInput.value.trim();
+  const imageExtractPrompt = imageExtractPromptInput.value.trim();
   if (!model) {
     setSettingsStatus("Selecciona un modelo.", true);
     return;
@@ -136,7 +193,7 @@ saveSettingsButton.addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         selectedModel: model,
-        prompts: { ideaPrompt, blockSummaryPrompt }
+        prompts: { ideaPrompt, blockSummaryPrompt, imageExtractPrompt }
       })
     });
 
@@ -144,6 +201,7 @@ saveSettingsButton.addEventListener("click", async () => {
     settingsPrompts = payload.prompts;
     ideaPromptInput.value = settingsPrompts.ideaPrompt || "";
     blockSummaryPromptInput.value = settingsPrompts.blockSummaryPrompt || "";
+    imageExtractPromptInput.value = settingsPrompts.imageExtractPrompt || "";
     renderModelSelection();
     setSettingsStatus("Settings guardados.");
   } catch (error) {
@@ -310,6 +368,7 @@ async function loadProjects(preferredProjectId = "") {
 
     projectSelect.value = selectedProjectId;
     micButton.disabled = !selectedProjectId;
+    processPhotosButton.disabled = !selectedProjectId || !(photoInput.files?.length > 0);
 
     if (selectedProjectId) {
       await loadFragments();
@@ -480,9 +539,14 @@ async function loadSettings() {
   try {
     const payload = await fetchJson("/api/settings");
     selectedModel = payload.selectedModel || "";
-    settingsPrompts = payload.prompts || { ideaPrompt: "", blockSummaryPrompt: "" };
+    settingsPrompts = payload.prompts || {
+      ideaPrompt: "",
+      blockSummaryPrompt: "",
+      imageExtractPrompt: ""
+    };
     ideaPromptInput.value = settingsPrompts.ideaPrompt || "";
     blockSummaryPromptInput.value = settingsPrompts.blockSummaryPrompt || "";
+    imageExtractPromptInput.value = settingsPrompts.imageExtractPrompt || "";
     renderModelSelection();
   } catch (error) {
     setSettingsStatus(error.message, true);
@@ -550,6 +614,11 @@ function setStatus(text, isError = false) {
 function setSettingsStatus(text, isError = false) {
   settingsStatus.textContent = text;
   settingsStatus.classList.toggle("error", isError);
+}
+
+function setPhotoStatus(text, isError = false) {
+  photoStatus.textContent = text;
+  photoStatus.classList.toggle("error", isError);
 }
 
 function isDeleteCommand(text) {
